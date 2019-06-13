@@ -1,0 +1,12 @@
+Uuid: 59a829852f914d5a9edb6dcc919dc4e5
+ExtensionType: 1
+Name: Directory Importer
+RepoName: directory-importer
+ScreenVersion: 1.0
+SerialVersion: 0
+MinPlatformVersion: 0
+ProOnly: False
+Author: Tanner Barnes
+ShortDescription: Import results from directory brute forcing tools including GoBuster and DirSearch
+EntryPoint: build/libs/directory-importer-all.jar
+BuildCommand: gradle fatJar

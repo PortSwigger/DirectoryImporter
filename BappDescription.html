@@ -1,0 +1,13 @@
+<p>This is a Burpsuite plugin for importing directory bruteforcing results into Burp for futher analysis.
+    This is an alternative to proxying bruteforcing tools through Burp to catch the results.</p>
+
+<p>Supported tools:</p>
+
+<ul>
+    <li>GoBuster</li>
+    <li>DirSearch</li>
+</ul>
+
+<p>It is modularized for easily adding parsing of different bruteforcing tools.
+To create a new parser make a new class that extends BaseParser and implement the parseDirectory method.
+    This takes a line from the bruteforce tool output file and returns a URL for burpsuite to use.</p>
