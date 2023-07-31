@@ -2,6 +2,8 @@ package parsers;
 
 import burp.HttpRequestResponse;
 import burp.IBurpExtenderCallbacks;
+import burp.IHttpRequestResponse;
+import burp.IResponseInfo;
 
 import javax.swing.*;
 import java.awt.*;
@@ -22,6 +24,8 @@ import java.net.URL;
  * on how to parse each line of output.
  */
 abstract public class BaseParser extends JPanel implements ActionListener {
+    private final JCheckBox followRedirectsCheckBox;
+    private final JCheckBox makeRequestsCheckBox;
     private IBurpExtenderCallbacks callbacks;
     private JButton openButton;
     private final JFileChooser fc = new JFileChooser();
@@ -29,10 +33,16 @@ abstract public class BaseParser extends JPanel implements ActionListener {
 
     BaseParser(IBurpExtenderCallbacks callbacks){
         this.callbacks = callbacks;
-        tabPanel = new JPanel(new GridLayout(3,1));
+        tabPanel = new JPanel(new GridLayout(0,1));
         openButton = new JButton("Open Bruteforce output file...");
         openButton.addActionListener(this);
         tabPanel.add(openButton);
+        JPanel optionsPanel = new JPanel();
+        this.followRedirectsCheckBox = new JCheckBox("Follow Redirects");
+        this.makeRequestsCheckBox = new JCheckBox("Make Web Requests");
+        optionsPanel.add(makeRequestsCheckBox);
+        optionsPanel.add(followRedirectsCheckBox);
+        tabPanel.add(optionsPanel);
         tabPanel.add(new JSeparator(SwingConstants.HORIZONTAL));
         add(tabPanel);
     }
@@ -41,7 +51,7 @@ abstract public class BaseParser extends JPanel implements ActionListener {
      * Gets the tabs panel so extending classes can add their options to it
      * @return JPanel
      */
-    public JPanel getTabPanel() {
+    JPanel getTabPanel() {
         return tabPanel;
     }
 
@@ -49,7 +59,7 @@ abstract public class BaseParser extends JPanel implements ActionListener {
      * Returns the burp callback class
      * @return reference to burp callback class
      */
-    IBurpExtenderCallbacks getCallbacks(){
+    private IBurpExtenderCallbacks getCallbacks(){
         return this.callbacks;
     }
 
@@ -83,13 +93,46 @@ abstract public class BaseParser extends JPanel implements ActionListener {
         byte[] httpRequest = this.getCallbacks().getHelpers()
                 .buildHttpRequest(url);
         reqResp.setRequest(httpRequest);
+        int port = url.getPort();
+        if (port == -1) { port = url.getDefaultPort(); }
         reqResp.setHttpService(this.getCallbacks().getHelpers()
                 .buildHttpService(
                         url.getHost(),
-                        url.getPort() == -1 ? 443 :
-                                url.getPort(),
-                        true));
+                        port,
+                        url.getProtocol().equals("https")));
         return reqResp;
+    }
+
+    private IHttpRequestResponse followRedirects(IHttpRequestResponse initial, int depth) {
+        if(depth != 3) {
+            IResponseInfo response = callbacks.getHelpers().analyzeResponse(initial.getResponse());
+            if (response.getStatusCode() == 301 || response.getStatusCode() == 302) {
+                for (String header : response.getHeaders()) {
+                    if (header.trim().startsWith("Location")) {
+                        HttpRequestResponse newRequest;
+                        try {
+                            String location = header.split("Location:")[1].trim();
+                            if(location.startsWith("http")) {
+                                newRequest = generateRequestResponse(location);
+                            } else {
+                                newRequest = generateRequestResponse(
+                                        initial.getHttpService().getProtocol()
+                                                +"://"+initial.getHttpService().getHost()
+                                                +"/"+location);
+                            }
+
+                            IHttpRequestResponse request = callbacks.makeHttpRequest(newRequest.getHttpService(),
+                                    newRequest.getRequest());
+                            this.callbacks.addToSiteMap(request);
+                            followRedirects(request, depth + 1);
+                        } catch (MalformedURLException ex) {
+                            ex.printStackTrace();
+                        }
+                    }
+                }
+            }
+        }
+        return initial;
     }
 
     /**
@@ -102,20 +145,39 @@ abstract public class BaseParser extends JPanel implements ActionListener {
         if (e.getSource() == openButton) {
             int returnVal = fc.showOpenDialog(BaseParser.this);
             if (returnVal == JFileChooser.APPROVE_OPTION) {
+
                 File file = fc.getSelectedFile();
                 try (BufferedReader br =
                              new BufferedReader(new FileReader(file))) {
                     String st;
                     while ((st = br.readLine()) != null) {
-
-                        HttpRequestResponse requestResponse =
-                                this.generateRequestResponse(st);
-                        Runnable task2 =
-                                () -> this.callbacks.addToSiteMap(
-                                        this.callbacks.makeHttpRequest(
-                                                requestResponse.getHttpService(),
-                                                requestResponse.getRequest()));
-                        new Thread(task2).start();
+                        try {
+                            HttpRequestResponse requestResponse
+                                = this.generateRequestResponse(st);
+                            System.out.println(requestResponse.getHttpService().getHost());
+                            System.out.println(requestResponse.getHttpService().getPort());
+                            Runnable task = () -> {
+                                if(makeRequestsCheckBox.isSelected()) {
+                                    IHttpRequestResponse request = callbacks.makeHttpRequest(
+                                            requestResponse.getHttpService(),
+                                            requestResponse.getRequest());
+                                    if (followRedirectsCheckBox.isSelected()) {
+                                        IHttpRequestResponse response = followRedirects(request, 0);
+                                        callbacks.addToSiteMap(response);
+                                    } else {
+                                        this.callbacks.addToSiteMap(
+                                                this.callbacks.makeHttpRequest(
+                                                        requestResponse.getHttpService(),
+                                                        requestResponse.getRequest()));
+                                    }
+                                } else {
+                                    this.callbacks.addToSiteMap(requestResponse);
+                                }
+                            };
+                            new Thread(task).start();
+                        } catch (MalformedURLException ex) {
+                            ex.printStackTrace();
+                        }
                     }
                     JOptionPane.showMessageDialog(BaseParser.this, "Successfully imported!",
                             "Directory Importer", JOptionPane.INFORMATION_MESSAGE);
